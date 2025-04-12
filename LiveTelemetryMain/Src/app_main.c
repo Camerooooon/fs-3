@@ -1,4 +1,6 @@
 #include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_gpio.h"
+#include "stm32f4xx_hal_spi.h"
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -15,24 +17,41 @@ bool to_hex(char* dest, size_t dest_len, const uint8_t* values, size_t val_len) 
     return true;
 }
 
+uint8_t calculate_checksum(const uint8_t *data, size_t length) {
+    uint16_t sum = 0;
+
+    // Sum all bytes
+    for (size_t i = 0; i < length; ++i) {
+        sum += data[i];
+    }
+
+    // Keep only the lowest 8 bits of the sum
+    uint8_t low_byte = sum & 0xFF;
+
+    // Subtract from 0xFF to get checksum
+    return 0xFF - low_byte;
+}
 
 int app_main(SPI_HandleTypeDef hspi1, UART_HandleTypeDef huart2) {
 
   while (1) {
     // HAL_GPIO_WritePin(GPIOC, 8, 1);
     const uint8_t local_at_command[] = {
+           // 7E 00 04 08 17 54 50 3C
       0x7E, // Start delimeter
+    
+      // Length of data segment in bytes 0x00 is ONE BYTE
       0x00,  // LEN - MSB
-      0x08,  // LEN - LSB
+      0x04,  // LEN - LSB 
 
       // ---- BEGIN DATA ----
-      0x08, // frametype
-      0x77, // frameid
-      0x41, 0x41, // AT command - "AA"
+      0x08, // frametype (0x08 => AT command)
+      0x17, // frameid (Doesn't matter?? Can be random, will correlate response)
+      0x54, 0x50, // AT command - (0x54 0x50 => TP)
       // (no parameter in this example)
       // ---- END DATA ----
 
-      (0xFF - ((0x08 + 0x01 + 0x41 + 0x41) & 0xFF)) // Checksum
+      (0xFF - ((0x08 + 0x17 + 0x54 + 0x50) & 0xFF)) // Checksum
     };
     
     // uint8_t frame[] = {
@@ -55,18 +74,22 @@ int app_main(SPI_HandleTypeDef hspi1, UART_HandleTypeDef huart2) {
 
 
     // CHIP SELECT LOW
+    HAL_GPIO_WritePin(GPIOC, 8, 0);
 
     // HAL_SPI_Transmit(&hspi1, frame, sizeof(frame), 100);
-    uint8_t resp_buf[1024] = {0};
-    HAL_SPI_TransmitReceive(&hspi1, local_at_command, resp_buf, sizeof(local_at_command), 100);
+    uint8_t resp_buf[100] = {0};
+    HAL_SPI_Transmit(&hspi1, local_at_command, sizeof(local_at_command), 100);
+    HAL_SPI_Receive(&hspi1, resp_buf, sizeof(resp_buf), 100);
 
-    HAL_Delay(1000);
+    HAL_GPIO_WritePin(GPIOC, 8, 1);
+
+    //HAL_Delay(1000);
     // uint8_t buf[] = "Hello World!\r\n";
     // HAL_UART_Transmit(&huart2, buf, sizeof(buf), 100);
     char str[1024] = {0};
-    // to_hex(str, sizeof(str), resp_buf, sizeof(resp_buf));
+    to_hex(str, sizeof(str), resp_buf, sizeof(resp_buf));
 
-    HAL_UART_Transmit(&huart2, (uint8_t*)resp_buf, sizeof(resp_buf), 100);
+    HAL_UART_Transmit(&huart2, (uint8_t*)str, sizeof(resp_buf), 100);
     HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 100);
   }
 }
